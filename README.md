@@ -5,9 +5,13 @@ A Retrieval-Augmented Generation (RAG) system that scrapes competitive intellige
 **Features**
 
 Web Scraping: Automated scraping of competitor news and blog posts
+
 Text Processing: Chunking and preprocessing of scraped content
+
 Vector Search: FAISS-based semantic search using sentence transformers
+
 RAG Pipeline: Retrieval-augmented generation for answering competitive intelligence questions
+
 Evaluation Framework: Automated evaluation of retrieval quality and answer accuracy
 
 **Tech Stack**
