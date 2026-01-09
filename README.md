@@ -1,6 +1,7 @@
 **GenAI Competitive Insights Agent**
 
 A Retrieval-Augmented Generation (RAG) system that scrapes competitive intelligence from news sources and enables natural language queries about competitor activities.
+
 **Features**
 
 Web Scraping: Automated scraping of competitor news and blog posts
@@ -60,6 +61,7 @@ bashpython src/llm/agent.py
 bashpython src/evaluation/evaluate.py
 
 **Key Components**
+
 Web Scraper (src/ingest/news_scraper.py)
 
 Scrapes competitor blogs and news sites
