@@ -21,22 +21,6 @@ LLM: OpenAI GPT-4o-mini (optional)
 Web Scraping: BeautifulSoup4, requests
 Data Processing: pandas, numpy
 
-Project Structure
-genai-competitive-insights/
-│
-├── data/
-│   ├── raw/              # Scraped articles
-│   └── processed/        # Chunked text and embeddings
-│
-├── src/
-│   ├── ingest/           # Web scraping modules
-│   ├── retrieval/        # Embedding and search
-│   ├── llm/              # LLM integration
-│   └── evaluation/       # Performance evaluation
-│
-├── requirements.txt
-└── README.md
-
 Setup
 
 Clone the repository
