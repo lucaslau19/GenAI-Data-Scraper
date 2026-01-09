@@ -26,17 +26,20 @@ Data Processing: pandas, numpy
 
 Create virtual environment
 
-```python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate```
+```bash python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
 
 Install dependencies
 
-```bash pip install -r requirements.txt```
+```bash pip install -r requirements.txt
+```
 
 Set up environment variables (optional, for LLM features)
 
 ```bash # Create .env file
-echo "OPENAI_API_KEY=your-key-here" > .env```
+echo "OPENAI_API_KEY=your-key-here" > .env
+```
 
 **Usage**
 
