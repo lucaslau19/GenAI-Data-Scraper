@@ -9,7 +9,7 @@ RAG Pipeline: Retrieval-augmented generation for answering competitive intellige
 Evaluation Framework: Automated evaluation of retrieval quality and answer accuracy
 
 Tech Stack
-
+ 
 Python 3.11
 RAG Components:
 
