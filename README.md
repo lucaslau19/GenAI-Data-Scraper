@@ -1,7 +1,7 @@
 **GenAI Competitive Insights Agent**
 
 A Retrieval-Augmented Generation (RAG) system that scrapes competitive intelligence from news sources and enables natural language queries about competitor activities.
-Features
+**Features**
 
 Web Scraping: Automated scraping of competitor news and blog posts
 Text Processing: Chunking and preprocessing of scraped content
