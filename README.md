@@ -84,8 +84,3 @@ Combines retrieval with LLM generation
 Provides context-aware answers
 Cites sources for transparency
 
-**Performance**
-
-Embedding Model: all-MiniLM-L6-v2 (384 dimensions)
-Retrieval Speed: ~50ms per query
-Index Size: Scales linearly with content volume
