@@ -1,0 +1,12 @@
+﻿.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+data/raw/
+data/processed/
+data/evaluation/
+.vscode/
+.idea/
+*.log

@@ -1,0 +1,9 @@
+openai
+tiktoken
+numpy
+pandas
+requests
+beautifulsoup4
+faiss-cpu
+scikit-learn
+python-dotenv
