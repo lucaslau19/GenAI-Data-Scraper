@@ -1,126 +1,211 @@
-import requests
-from bs4 import BeautifulSoup
-from datetime import datetime
+"""News article scraper with retry support, structured logging, and type hints.
+
+Run from project root:
+    python -m src.ingest.news_scraper
+"""
+
 import json
+import logging
+import sys
 import os
 import time
+from datetime import datetime, timezone
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
-OUTPUT_DIR = "data/raw"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+import requests
+from bs4 import BeautifulSoup
 
-def scrape_article(url):
-    """Scrape a single article"""
-    print(f"  Scraping: {url}")
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
-    
-    response = requests.get(url, timeout=10, headers=headers)
-    response.raise_for_status()
+# Ensure project root is importable when run as a script
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
+from src.config import config  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
+
+# ── HTTP helpers ──────────────────────────────────────────────────────────────
+
+def _build_session() -> requests.Session:
+    session = requests.Session()
+    session.headers.update({"User-Agent": config.user_agent})
+    return session
+
+
+def _get_with_retry(
+    session: requests.Session,
+    url: str,
+    *,
+    retries: int | None = None,
+    timeout: int | None = None,
+) -> requests.Response:
+    """GET *url* with exponential back-off on failure."""
+    retries = retries if retries is not None else config.max_retries
+    timeout = timeout if timeout is not None else config.request_timeout
+
+    for attempt in range(1, retries + 1):
+        try:
+            response = session.get(url, timeout=timeout)
+            response.raise_for_status()
+            return response
+        except requests.RequestException as exc:
+            if attempt == retries:
+                raise
+            wait = 2 ** attempt
+            logger.warning(
+                "Attempt %d/%d failed for %s: %s. Retrying in %ds…",
+                attempt, retries, url, exc, wait,
+            )
+            time.sleep(wait)
+    raise RuntimeError("Unreachable")  # pragma: no cover
+
+
+# ── Core scraping ─────────────────────────────────────────────────────────────
+
+def scrape_article(
+    url: str,
+    session: requests.Session | None = None,
+) -> dict[str, Any]:
+    """Scrape a single article URL and return its structured data."""
+    logger.info("Scraping: %s", url)
+    session = session or _build_session()
+
+    response = _get_with_retry(session, url)
     soup = BeautifulSoup(response.text, "html.parser")
 
-    # Get title
-    title = soup.find('h1')
-    title_text = title.get_text().strip() if title else "No title"
+    # Strip boilerplate
+    for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+        tag.decompose()
 
-    # Get article content
-    paragraphs = soup.find_all("p")
-    text = "\n".join(p.get_text() for p in paragraphs)
+    title_tag = soup.find("h1")
+    title = title_tag.get_text(separator=" ").strip() if title_tag else "No title"
+
+    # Prefer <article> body; fall back to all <p> tags
+    article_body = soup.find("article") or soup
+    paragraphs = article_body.find_all("p")
+    content = "\n".join(
+        p.get_text(separator=" ").strip()
+        for p in paragraphs
+        if p.get_text(strip=True)
+    )
+
+    if not content:
+        logger.warning("No paragraph content found at %s", url)
 
     return {
         "url": url,
-        "title": title_text,
-        "scraped_at": datetime.utcnow().isoformat(),
-        "content": text.strip()
+        "title": title,
+        "scraped_at": datetime.now(timezone.utc).isoformat(),
+        "content": content,
+        "word_count": len(content.split()),
     }
 
-def find_article_links(homepage_url, max_links=5):
-    """Find article links from a homepage"""
-    print(f"\nFinding articles on: {homepage_url}")
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
-    
-    response = requests.get(homepage_url, timeout=10, headers=headers)
-    response.raise_for_status()
-    
+
+def find_article_links(
+    homepage_url: str,
+    session: requests.Session | None = None,
+    max_links: int = 5,
+    keywords: list[str] | None = None,
+) -> list[str]:
+    """Discover article links on a homepage, filtered by URL keywords."""
+    logger.info("Discovering article links on: %s (max=%d)", homepage_url, max_links)
+    session = session or _build_session()
+    keywords = keywords or ["blog", "news", "article", "post", "press", "insight"]
+
+    response = _get_with_retry(session, homepage_url)
     soup = BeautifulSoup(response.text, "html.parser")
-    
-    # Find all links
-    links = []
+
     base_domain = urlparse(homepage_url).netloc
-    
-    for link in soup.find_all('a', href=True):
-        href = link['href']
+    seen: set[str] = set()
+    links: list[str] = []
+
+    for a_tag in soup.find_all("a", href=True):
+        href: str = str(a_tag["href"]).strip()
         full_url = urljoin(homepage_url, href)
-        
-        # Only include links from the same domain
-        if urlparse(full_url).netloc == base_domain:
-            # Filter for likely article URLs (customize per site)
-            if any(keyword in full_url.lower() for keyword in ['blog', 'news', 'article', 'post', '202']):
-                if full_url not in links:
-                    links.append(full_url)
-                    if len(links) >= max_links:
-                        break
-    
-    print(f"  Found {len(links)} article links")
+        parsed = urlparse(full_url)
+
+        if parsed.scheme not in ("http", "https"):
+            continue
+        if parsed.netloc != base_domain:
+            continue
+        if full_url in seen:
+            continue
+        if not any(kw in full_url.lower() for kw in keywords):
+            continue
+
+        seen.add(full_url)
+        links.append(full_url)
+        if len(links) >= max_links:
+            break
+
+    logger.info("Found %d article links on %s", len(links), homepage_url)
     return links
 
+
+def scrape_sites(sites: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Scrape multiple sites defined by a list of config dicts.
+
+    Each dict accepts:
+        homepage     (required) – URL to crawl for article links
+        name         – human-readable site name
+        max_articles – maximum articles to scrape per site (default: 5)
+        keywords     – URL keyword filters for article discovery
+    """
+    session = _build_session()
+    all_articles: list[dict[str, Any]] = []
+
+    for site in sites:
+        name = site.get("name", site.get("homepage", "Unknown"))
+        logger.info("Processing site: %s", name)
+        try:
+            links = find_article_links(
+                site["homepage"],
+                session=session,
+                max_links=site.get("max_articles", 5),
+                keywords=site.get("keywords"),
+            )
+        except requests.RequestException as exc:
+            logger.error("Failed to fetch links for %s: %s", name, exc)
+            continue
+
+        for link in links:
+            try:
+                article = scrape_article(link, session=session)
+                article["source_name"] = name
+                all_articles.append(article)
+                time.sleep(config.request_delay)
+            except requests.RequestException as exc:
+                logger.warning("Failed to scrape %s: %s", link, exc)
+
+    return all_articles
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    print("Starting improved news scraper...")
-    
-    # Sites to scrape
-    sites = [
+    config.setup_logging()
+
+    _sites = [
         {
             "name": "Microsoft 365 Blog",
             "homepage": "https://www.microsoft.com/en-us/microsoft-365/blog/",
-            "max_articles": 3
+            "max_articles": 3,
         },
         {
             "name": "Salesforce News",
             "homepage": "https://www.salesforce.com/news/",
-            "max_articles": 3
-        }
+            "max_articles": 3,
+        },
     ]
 
-    all_articles = []
+    articles = scrape_sites(_sites)
+    config.raw_data_dir.mkdir(parents=True, exist_ok=True)
 
-    for site in sites:
-        print(f"\n{'='*60}")
-        print(f"Processing: {site['name']}")
-        print('='*60)
-        
-        try:
-            # Get article links
-            article_links = find_article_links(site['homepage'], max_links=site['max_articles'])
-            
-            # Scrape each article
-            for link in article_links:
-                try:
-                    article = scrape_article(link)
-                    all_articles.append(article)
-                    time.sleep(1)  # Be polite, don't hammer servers
-                except Exception as e:
-                    print(f"  ✗ Failed to scrape article: {e}")
-                    
-        except Exception as e:
-            print(f"✗ Failed to process {site['name']}: {e}")
+    with config.articles_path.open("w", encoding="utf-8") as fh:
+        json.dump(articles, fh, indent=2)
 
-    # Save results
-    output_path = os.path.join(OUTPUT_DIR, "articles.json")
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(all_articles, f, indent=2)
-
-    print(f"\n{'='*60}")
-    print(f"✓ Saved {len(all_articles)} articles to {output_path}")
-    print('='*60)
-    
-    # Show summary
-    if all_articles:
-        print("\nArticles scraped:")
-        for i, article in enumerate(all_articles, 1):
-            print(f"{i}. {article['title'][:60]}... ({len(article['content'])} chars)")
+    logger.info("Saved %d articles to %s", len(articles), config.articles_path)
+    for i, a in enumerate(articles, 1):
+        logger.info("%d. %s (%d words)", i, a["title"][:70], a["word_count"])
